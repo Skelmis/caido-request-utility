@@ -13,3 +13,9 @@ dev = [
     "black>=26.5.1",
     "ty>=0.0.38",
 ]
+
+[tool.hatch.build.targets.sdist]
+include = ["cru"]
+
+[tool.hatch.build.targets.wheel]
+include = ["cru"]
