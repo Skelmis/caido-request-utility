@@ -1,5 +1,5 @@
 [project]
-name = "caido-request-utility"
+name = "skelmis-cru"
 description = "A utility helper for working with Caido request exports"
 version = "0.1.0"
 requires-python = ">=3.12"
