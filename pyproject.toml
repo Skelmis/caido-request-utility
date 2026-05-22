@@ -1,8 +1,11 @@
 [project]
 name = "skelmis-cru"
 description = "A utility helper for working with Caido request exports"
+authors = [{ name = "skelmis", email = "skelmis.craft@gmail.com" }]
 version = "0.1.0"
 requires-python = ">=3.12"
+readme = "README.md"
+license = "MIT"
 dependencies = [
     "idox>=1.5.1",
     "pypika>=0.51.1",
@@ -13,6 +16,14 @@ dev = [
     "black>=26.5.1",
     "ty>=0.0.38",
 ]
+
+[project.urls]
+"Issue tracker" = "https://github.com/Skelmis/caido-request-utility/issues"
+Homepage = "https://github.com/Skelmis/caido-request-utility"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
 include = ["cru"]
