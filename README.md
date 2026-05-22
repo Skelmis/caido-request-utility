@@ -24,6 +24,14 @@ if __name__ == "__main__":
 
 Technically this is SQL agnostic, just override `cru.sql_util.execute` to use your DB specific execution logic.
 
+## Idea Roadmap
+
+- Output an HTML page with statistics such as hosts hit, unique routes, etc
+- Support for providing a scope for narrowing data aggregation
+- Generic insights such as security headers or extracting all observed content security policies to see if they are consistent
+
+*P.s. You should contribute ideas! If you have an idea of what to do with raw request data, open an issue.*
+
 ## Reference
 
 Table: `raw_requests`
