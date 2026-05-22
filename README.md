@@ -27,7 +27,9 @@ Technically this is SQL agnostic, just override `cru.sql_util.execute` to use yo
 ## Reference
 
 Table: `raw_requests`
+
 Description: Raw data that matches the Caido export.
+
 Definition:
 ```sql
  CREATE TABLE IF NOT EXISTS "raw_requests"
@@ -61,7 +63,9 @@ Definition:
 ```
 
 Table: `requests`
+
 Description: Beautified data ready for use in tooling.
+
 Definition:
 ```sql
  CREATE TABLE IF NOT EXISTS "requests"
