@@ -1,106 +1,85 @@
 Caido Request Utility (CRU)
 ---
 
-This tool lets you take a Caido export and turn it into a SQL database for ease of tooling interactions.
+Turn a Caido (or Burp) export into a SQLite `requests` table, then run a
+passive scanner over it to surface likely vulnerabilities.
+
+The scanner **never sends traffic**. Every finding is a lead to confirm by hand
+against a system you are authorised to test.
+
+## Install
+
+```bash
+pip install skelmis-cru          # core
+pip install "skelmis-cru[all]"   # plus defusedxml and brotli
+```
+
+The extras are optional but recommended for Burp imports:
+
+- `defusedxml` lets an export that contains a DTD parse. Without it, the stdlib
+  fallback rejects any `<!DOCTYPE>` or `<!ENTITY>`.
+- `brotli` decompresses `Content-Encoding: br` bodies. Without it, those bodies
+  stay unreadable to the checks.
 
 ## Usage
 
-This is a basic script to import and load data to SQLite
+One command imports, scans and reports:
+
+```bash
+python -m cru export.csv -o report.html   # Caido export in, HTML report out
+python -m cru export.csv                  # print findings to the terminal
+python -m cru history.xml -o report.html  # Burp XML export in, HTML report out
+python -m cru corpus.db -o report.html    # already-imported database
+```
+
+`.csv` is read as a Caido export, `.xml` as a Burp export, and anything else as
+an existing database. Useful flags:
+
+- `--check NAME` runs one check.
+- `--skip NAME ...` drops checks from a full run.
+- `--show-secrets` unredacts secret matches.
+- `--no-progress` hides the progress bar.
+
+Each step also runs on its own:
+
+```bash
+python -m cru.burp_to_sql history.xml -o corpus.db         # import Burp
+python -m cru.passive_scan corpus.db --check sqli --json   # scan
+python -m cru.report_html corpus.db -o report.html         # JSON + HTML report
+python -m cru.idor_finder corpus.db                        # IDOR candidates
+```
+
+To import from Python:
+
 ```python
 import sqlite3
 from pathlib import Path
 
 import cru.csv_to_sql
 
-
-def main():
-    con: sqlite3.Connection = sqlite3.connect("test.db")
-    cru.csv_to_sql.create_and_populate_from_csv(con, Path("test.csv"))
-
-
-if __name__ == "__main__":
-    main()
+con = sqlite3.connect("test.db")
+cru.csv_to_sql.create_and_populate_from_csv(con, Path("test.csv"))
 ```
 
-Technically this is SQL agnostic, just override `cru.sql_util.execute` to use your DB specific execution logic.
+To target another database, override `cru.sql_util.execute` and
+`cru.sql_util.execute_many`.
 
-## Passive scanning
+## The report
 
-Once traffic is in the `requests` table, `cru.passive_scan` runs 23 pattern
-checks over it and reports what looks worth a closer look. It is **passive**: it
-reads the corpus and sends no traffic of its own, so every finding is a lead to
-confirm by hand against a system you are authorised to test.
+The report is a single self-contained HTML file:
 
-```
-Caido export ──(csv_to_sql)──┐
-                             ├─► requests table ─► passive_scan ─► findings ─► report_html
-Burp XML export ─(burp_to_sql)─┘
-```
+- Findings are grouped by host and check. They are not ranked by severity.
+- Expanding a finding shows the request and response it came from, with the
+  match highlighted.
+- Base64, hex and JWT values are decoded at import and shown in a `#decoded`
+  tab. Every check scans the decoded view too.
+- Secrets are masked everywhere, including in the message panes.
+- Each rule name links to the check's source. `cru.report_html --repo-url`
+  points the links at a fork or a tag.
+- All values are rendered as text, so payloads in the corpus cannot XSS the
+  report.
 
-One command does the lot — import, scan, report:
-
-```bash
-uv run python -m cru export.csv -o report.html  # CSV in, findings and a report out
-uv run python -m cru export.csv                 # import and print the findings
-uv run python -m cru corpus.db -o report.html   # already imported, just report
-uv run python -m cru history.xml --db burp.db   # a Burp export instead
-```
-
-The source is recognised by extension: `.csv` is a Caido export, `.xml` a Burp
-one, anything else is taken to be a database that is already built. `--check`
-picks a single check, `--skip` drops one or more from a full run (`--skip
-secrets idor`), and `--no-progress` turns off the progress bar. The steps
-still stand on their own:
-
-```bash
-uv run python -m cru.passive_scan corpus.db --check all          # every check
-uv run python -m cru.passive_scan corpus.db --check sqli --json  # one check, JSON out
-uv run python -m cru.passive_scan corpus.db --show-secrets       # unredact secret matches
-uv run python -m cru.report_html corpus.db -o report.html        # JSON + self-contained HTML
-uv run python -m cru.idor_finder corpus.db                       # IDOR candidates (separate tool)
-```
-
-A full run (`--check all`) also carries `idor_finder`'s candidates under the
-check name `idor`, in the terminal scan and in the report alike, so they filter,
-search and show their request like any other finding. `--check idor` runs that
-pass on its own and `--skip idor` leaves it out; the standalone tool is still
-there for its own output.
-
-`idor_finder` is deliberate about what it will *not* call an object
-reference: a JWT under any parameter name (a signed, expiring credential is not
-enumerable — that is the `jwt` check's business), a bare integer on a parameter
-named for a quantity or a position (`offset`, `per_page`, `x`, `_key`), and any
-candidate seen with a single distinct ID — with nothing to enumerate and nothing
-to compare, that is not a lead (`--min-distinct 1` puts them back). A short list you can act on
-beats a long one you have to sift.
-
-Findings are grouped by host. A corpus with one host opens expanded; with
-several, the groups start closed — and narrowing to a single host, by filter or
-by search, expands it again.
-
-In the report, an IDOR candidate lists every ID it was observed with in its own
-dropdown, the way a deduplicated finding lists its paths. A finding's rule name
-links to the source of the check that raised it, so "why did this fire?" is one
-click. The links point at this repo on
-`main`; `--repo-url` aims them at a fork or a tag instead.
-
-A finding offers the decoded view of the field it came from, so a token in a
-cookie is one tab away from its claims. The decoded view spells JWTs out rather
-than leaving them as opaque tokens:
-each one appears as `{"alg": "HS256", ...}.{"sub": "42", ...}.<signature>`, so
-the claims are readable in the report's `#decoded` tab and scannable by every
-check. Tokens wrapped inside another base64 field are expanded too.
-
-Findings are grouped by check and are not ranked by severity. Expanding one
-shows the request it came out of — reconstructed from the stored fields, with
-the matched string highlighted — and tabs for the response and for any decoded
-view the evidence actually surfaced in. Secrets stay masked there too, so the
-message cannot leak what the finding hides; `--show-secrets` reveals both. The
-HTML report is a single self-contained file that builds every finding value and
-every byte of a message through `textContent`, so it cannot be XSS'd by the
-payloads it displays.
-
-### The checks
+## The checks
 
 | Check | Catches |
 |-------|---------|
@@ -128,89 +107,40 @@ payloads it displays.
 | `cleartext` | Credentials, cookies, or `Authorization` sent over plain HTTP |
 | `csrf` | State-changing cookie-authenticated requests with no visible CSRF token |
 
-[**CHECKS.md**](CHECKS.md) has the full reference: what each check reads, its
-signatures, and where it stops — plus the corpus-wide limits that apply to all
-of them (duplicate headers collapse, fields and evidence truncate, and findings
-dedupe, so a finding count is not a request count).
+IDOR candidates from `idor_finder` also appear in a full run under the name
+`idor`.
 
-### Encoding coverage
-
-Payloads are often wrapped in base64 or hex to slip past a naive scan, so the
-importers decode each field once at load time into `query_decoded`,
-`body_decoded`, `cookies_decoded`, `headers_decoded` and
-`response_body_decoded`. Every check sees those as extra `#decoded` views, which
-is why a finding's location may read `request-body#decoded`.
-
-Both import paths write these columns — they share one table definition in
-`cru/schema.py` — so any database CRU builds has the coverage already.
+[CHECKS.md](CHECKS.md) is the full reference: what each check reads, its
+patterns, and its limits.
 
 ## Importing from Burp
 
-`cru.burp_to_sql` reads a Burp Suite **"Save items"** XML export into the same
-`requests` schema, so everything above works on Burp data too.
+The Burp importer reads a **"Save items"** XML export. It does not parse
+binary `.burp` project files, so open those in Burp first.
 
-### Producing the export
+1. Go to **Proxy → HTTP history**, or **Target → Site map**.
+2. Filter to the items you want, for example with "Show only in-scope items".
+3. Select them. `Ctrl-A` selects all. "Save items" only saves the selection.
+4. Right-click → **Save items**, and save as `.xml`.
+5. Leave base64 encoding on (the default), so binary bodies are not mangled.
 
-1. Go to **Proxy → HTTP history**, or **Target → Site map** for a crawled tree.
-2. Filter first — set your scope and apply "Show only in-scope items", or filter
-   by host. The export is a straight dump of what you select.
-3. Select the items you want; `Ctrl-A` selects all of them. **"Save items" acts
-   on the current selection**, so selecting nothing exports nothing.
-4. Right-click the selection → **Save items**, and save as `.xml`.
-5. Leave base64 encoding enabled (Burp's default). Raw request and response
-   bytes survive base64 intact; without it, binary bodies can be mangled.
-
-From a saved `.burp` project file, open the project in Burp first
-(**File → Open project**) and follow the same steps — the binary project format
-is not parsed.
-
-### Importing
+Then import, scan and report in one command:
 
 ```bash
-uv run python -m cru.burp_to_sql history.xml -o burp.db            # import
-uv run python -m cru.burp_to_sql history.xml -o burp.db --replace  # drop existing table first
+python -m cru history.xml -o report.html
 ```
 
-Items are streamed rather than loaded as one tree, so large exports do not need
-to fit in memory. Per `<item>`, `<request>` is required (items without one are
-skipped and counted); `<response>`, `<host>`, `<port>`, `<protocol>`,
-`<status>` and `<responselength>` are used when present.
+The export has no timestamps, so `created_at` and `response_created_at` are
+`0`. Messages that do not parse are skipped and counted.
 
-### Notes
+## Roadmap
 
-- **`uv add defusedxml`** before importing an export you did not produce
-  yourself. Without it the stdlib fallback rejects any `<!DOCTYPE>` or
-  `<!ENTITY>` outright — safe, but an export that legitimately contains a DTD
-  will fail to parse rather than being trusted.
-- **`uv add brotli`** if the target serves `Content-Encoding: br`, or those
-  response bodies stay compressed and unreadable to the checks. gzip and deflate
-  need nothing extra.
-- The export carries no timestamps, so `created_at` and `response_created_at`
-  are written as `0`.
-- A message that will not parse is skipped, counted and reported rather than
-  failing the import; real traffic always has a few.
-- The `*_decoded` columns are filled at import time, so a Burp-imported database
-  has encoding coverage from the start. That also means a database imported
-  before a decoding change keeps the old columns — re-import to pick one up.
+- A scope option to narrow what is aggregated
+- Tests against a large corpus (10k+ requests)
+- Make the HTML report scale to 100k requests: virtualise the list, debounce
+  search, and load message panes lazily
 
-## Idea Roadmap
-
-- Support for providing a scope for narrowing data aggregation
-- Broader test coverage
-- Tests against large sample data, on the order of 10k requests, to catch
-  paging and memory behaviour the small fixtures cannot
-- Make the HTML report hold up on a large corpus — 100k requests, and the
-  findings that come with them. The report is a single self-contained file
-  that embeds the whole document as JSON, parses it on load and renders every
-  visible finding as DOM: at that size the page gets big to download, slow to
-  open, and slow again on each filter or search, since `render()` rebuilds the
-  list from scratch. Worth doing: virtualise the list so only the rows on
-  screen exist, debounce the search, keep the message panes out of the initial
-  payload (fetch or lazily expand them), and put a ceiling on how much of a
-  body is embedded at all. The measurement comes first — build a corpus at
-  that scale and find out which of those actually hurts
-
-*P.s. You should contribute ideas! If you have an idea of what to do with raw request data, open an issue.*
+Have an idea for what to do with raw request data? Open an issue.
 
 ## Reference
 
@@ -285,7 +215,7 @@ Definition:
 ```
 
 The `*_decoded` columns hold base64/hex plaintext recovered from the matching
-field at import time — see [Encoding coverage](#encoding-coverage).
+field at import time.
 
 Indexes:
 ```sql
