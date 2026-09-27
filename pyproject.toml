@@ -2,7 +2,7 @@
 name = "skelmis-cru"
 description = "A utility helper for working with Caido request exports"
 authors = [{ name = "skelmis", email = "skelmis.craft@gmail.com" }]
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.12"
 readme = "README.md"
 license = "MIT"
